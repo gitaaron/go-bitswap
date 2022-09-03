@@ -2,6 +2,11 @@ package session
 
 import (
 	"context"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/ipfs/go-bitswap/client/internal"
@@ -21,6 +26,8 @@ import (
 
 var log = logging.Logger("bs:sess")
 var sflog = log.Desugar()
+
+var ifLog = false
 
 const (
 	broadcastLiveWantsLimit = 64
@@ -230,9 +237,32 @@ func (s *Session) logReceiveFrom(from peer.ID, interestedKs []cid.Cid, haves []c
 
 // GetBlock fetches a single block.
 func (s *Session) GetBlock(ctx context.Context, k cid.Cid) (blocks.Block, error) {
+	ifLog = false
+	ipfsTestFolder := os.Getenv("PERFORMANCE_TEST_DIR")
+	if ipfsTestFolder == "" {
+		ipfsTestFolder = "/ipfs-tests"
+	}
+	if _, err := os.Stat(path.Join(ipfsTestFolder, fmt.Sprintf("lookup-%v", k.String()))); err == nil {
+		ifLog = true
+		ioutil.WriteFile(path.Join(ipfsTestFolder, fmt.Sprintf("in-progress-lookup-%v", k.String())), []byte{1}, os.ModePerm)
+	}
+	if ifLog {
+		fmt.Printf("%s: Start retrieving content for %v\n", time.Now().Format(time.RFC3339Nano), k.String())
+	}
 	ctx, span := internal.StartSpan(ctx, "Session.GetBlock")
 	defer span.End()
-	return bsgetter.SyncGetBlock(ctx, k, s.GetBlocks)
+  block, err := bsgetter.SyncGetBlock(ctx, k, s.GetBlocks)
+	if ifLog {
+		errMsg := ""
+		if err != nil {
+			errMsg = strings.ReplaceAll(err.Error(), "\n", ", ")
+		}
+		fmt.Printf("%s: Done retrieving content for %v error: %s\n", time.Now().Format(time.RFC3339Nano), k.String(), errMsg)
+		os.Remove(path.Join(ipfsTestFolder, fmt.Sprintf("lookup-%v", k.String())))
+		os.WriteFile(path.Join(ipfsTestFolder, fmt.Sprintf("ok-lookup-%v", k.String())), []byte{0}, os.ModePerm)
+		ifLog = false
+	}
+	return block, err
 }
 
 // GetBlocks fetches a set of blocks within the context of this session and
@@ -398,6 +428,9 @@ func (s *Session) findMorePeers(ctx context.Context, c cid.Cid) {
 		for p := range s.providerFinder.FindProvidersAsync(ctx, k) {
 			// When a provider indicates that it has a cid, it's equivalent to
 			// the providing peer sending a HAVE
+			if ifLog {
+				fmt.Printf("%s: Got provider %v for content %v\n", time.Now().Format(time.RFC3339Nano), p.String(), c.String())
+			}
 			s.sws.Update(p, nil, []cid.Cid{c}, nil)
 		}
 	}(c)
@@ -469,8 +502,10 @@ func (s *Session) wantBlocks(ctx context.Context, newks []cid.Cid) {
 
 // Send want-haves to all connected peers
 func (s *Session) broadcastWantHaves(ctx context.Context, wants []cid.Cid) {
-	log.Debugw("broadcastWantHaves", "session", s.id, "cids", wants)
-	s.pm.BroadcastWantHaves(ctx, wants)
+  if !ifLog {
+    log.Debugw("broadcastWantHaves", "session", s.id, "cids", wants)
+    s.pm.BroadcastWantHaves(ctx, wants)
+  }
 }
 
 // The session will broadcast if it has outstanding wants and doesn't receive

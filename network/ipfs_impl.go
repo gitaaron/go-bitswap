@@ -372,7 +372,17 @@ func (bsnet *impl) Stop() {
 }
 
 func (bsnet *impl) ConnectTo(ctx context.Context, p peer.ID) error {
-	return bsnet.host.Connect(ctx, peer.AddrInfo{ID: p})
+	wasConnected := bsnet.host.Network().Connectedness(p) == network.Connected
+	if !wasConnected {
+		fmt.Printf("%s: Bitswap connect to peer %s\n", time.Now().Format(time.RFC3339Nano), p)
+	}
+	if err := bsnet.host.Connect(ctx, peer.AddrInfo{ID: p}); err != nil {
+		return err
+	}
+	if !wasConnected {
+		fmt.Printf("%s: Bitswap connected to peer %s\n", time.Now().Format(time.RFC3339Nano), p)
+	}
+	return nil
 }
 
 func (bsnet *impl) DisconnectFrom(ctx context.Context, p peer.ID) error {
