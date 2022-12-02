@@ -375,7 +375,10 @@ func (bsnet *impl) ConnectTo(ctx context.Context, p peer.ID) error {
 	wasConnected := bsnet.host.Network().Connectedness(p) == network.Connected
 	if !wasConnected {
 		fmt.Printf("%s: Bitswap connect to peer %s\n", time.Now().Format(time.RFC3339Nano), p)
+	} else {
+		fmt.Printf("%s: Bitswap was already connected to peer %s\n", time.Now().Format(time.RFC3339Nano), p)
 	}
+
 	if err := bsnet.host.Connect(ctx, peer.AddrInfo{ID: p}); err != nil {
 		return err
 	}
